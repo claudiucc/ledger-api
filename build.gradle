@@ -37,6 +37,9 @@ dependencies {
     annotationProcessor 'org.projectlombok:lombok'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    // Spring Boot 4 moved MockMvc test-slice autoconfiguration (@AutoConfigureMockMvc) out of
+    // spring-boot-test-autoconfigure into its own thin module.
+    testImplementation 'org.springframework.boot:spring-boot-webmvc-test'
     testImplementation 'org.springframework.kafka:spring-kafka-test'
     testImplementation 'org.testcontainers:junit-jupiter'
     testImplementation 'org.testcontainers:mysql'
@@ -57,4 +60,11 @@ dependencyManagement {
 tasks.named('test') {
     useJUnitPlatform()
     maxHeapSize = '1g'
+    // Gradle's forked test JVM doesn't reliably inherit DOCKER_HOST from the launching shell
+    // (e.g. Rancher Desktop's non-standard socket path); pass it through explicitly so
+    // Testcontainers can find the Docker daemon.
+    def dockerHost = System.getenv('DOCKER_HOST') ?: "unix://${System.getProperty('user.home')}/.rd/docker.sock"
+    environment 'DOCKER_HOST', dockerHost
+    systemProperty 'docker.host', dockerHost
+    systemProperty 'testcontainers.docker.host', dockerHost
 }
