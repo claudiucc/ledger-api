@@ -4,52 +4,55 @@ import com.ledgerapi.domain.*;
 import com.ledgerapi.error.ConflictException;
 import com.ledgerapi.error.NotFoundException;
 import com.ledgerapi.error.ValidationException;
-// import com.ledgerapi.error.LedgerApiException.FieldError;
+import com.ledgerapi.error.LedgerApiException.FieldError;
 // import com.ledgerapi.messaging.OutboxEvent;
 // import com.ledgerapi.messaging.OutboxEventRepository;
 // import com.ledgerapi.messaging.TransactionRecordedPayload;
 // import tools.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-// import org.hibernate.Hibernate;
-// import org.springframework.data.domain.Page;
-// import org.springframework.data.domain.Pageable;
+import org.hibernate.Hibernate;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-// import java.time.Instant;
+import java.time.Instant;
 import java.util.*;
 
 /**
- * Opens accounts and reads them back with their current balance.
- *
- * <p>Focused on Accounts only for now (open / read with balance). Recording and reversing
- * transactions, and listing an account's entries, are commented out below (full implementation
- * kept intact) while that is built back in as its own step.
+ * Validates and records transactions, and reverses them, on top of opening/reading accounts.
+ * This is the single place money moves: every entry point in the application (REST, and later
+ * the payment-settled consumer) goes through here.
  *
  * <p>Accounts touched by a transaction are locked in a single global order (sorted by id) before
  * any balance is read or changed, so two transactions that touch the same accounts in opposite
- * order (A->B and B->A) always acquire their locks in the same sequence and can never deadlock -
- * see the commented-out {@code record}/{@code reverseTransaction} methods.
+ * order (A->B and B->A) always acquire their locks in the same sequence and can never deadlock.
+ * Every check in {@link #record} runs before anything is persisted, so a refused transaction
+ * leaves nothing behind - either every entry is written, or none of them are.
+ *
+ * <p>Outbox publishing (announcing a recorded transaction to other services) and idempotency-key
+ * wrapping are temporarily disabled (see the commented-out field, constructor params and method
+ * at the bottom) while those are built back in as their own steps.
  */
 @Slf4j
 @Service
 public class LedgerService {
 
     private final AccountRepository accountRepository;
-    // private final TransactionRepository transactionRepository;
-    // private final EntryRepository entryRepository;
+    private final TransactionRepository transactionRepository;
+    private final EntryRepository entryRepository;
     // private final OutboxEventRepository outboxEventRepository;
     // private final ObjectMapper objectMapper;
 
-    public LedgerService(AccountRepository accountRepository /*,
+    public LedgerService(AccountRepository accountRepository,
                           TransactionRepository transactionRepository,
-                          EntryRepository entryRepository,
+                          EntryRepository entryRepository /*,
                           OutboxEventRepository outboxEventRepository,
                           ObjectMapper objectMapper */) {
         this.accountRepository = accountRepository;
-        // this.transactionRepository = transactionRepository;
-        // this.entryRepository = entryRepository;
+        this.transactionRepository = transactionRepository;
+        this.entryRepository = entryRepository;
         // this.outboxEventRepository = outboxEventRepository;
         // this.objectMapper = objectMapper;
     }
@@ -102,9 +105,8 @@ public class LedgerService {
                 .orElseThrow(() -> new NotFoundException("ACCOUNT_NOT_FOUND", "No account with id " + id));
     }
 
-    // --- Transactions, reversals and entries: disabled for now while we focus on Accounts only.
-    // Full implementation kept below, commented out, to be built back in as its own step. ---
-    /*
+    // --- Transactions and reversals ---
+
     @Transactional(readOnly = true)
     public Transaction getTransaction(String id) {
         Transaction transaction = transactionRepository.findById(id)
@@ -113,7 +115,7 @@ public class LedgerService {
         return transaction;
     }
 
-    // An account's entries, newest first, paged, each with the balance after it.
+    /** An account's entries, newest first, paged, each with the balance after it. */
     @Transactional(readOnly = true)
     public Page<Entry> getEntries(String accountId, Instant asOf, Pageable pageable) {
         if (!accountRepository.existsById(accountId)) {
@@ -264,6 +266,5 @@ public class LedgerService {
     //     }
     //     outboxEventRepository.save(new OutboxEvent("Transaction", transaction.getId(), "TransactionRecorded", json, requestId));
     // }
-    */
 }
 

@@ -1,33 +1,31 @@
 package com.ledgerapi.api;
 
-// import com.ledgerapi.api.dto.RecordTransactionRequest;
-// import com.ledgerapi.api.dto.TransactionResponse;
-// import com.ledgerapi.domain.Direction;
-// import com.ledgerapi.domain.Transaction;
-// import com.ledgerapi.error.ValidationException;
+import com.ledgerapi.api.dto.RecordTransactionRequest;
+import com.ledgerapi.api.dto.TransactionResponse;
+import com.ledgerapi.domain.Direction;
+import com.ledgerapi.domain.Transaction;
+import com.ledgerapi.error.ValidationException;
 // import com.ledgerapi.idempotency.IdempotencyService;
-// import com.ledgerapi.ledger.LedgerService;
-// import com.ledgerapi.web.RequestIdFilter;
-// import org.springframework.http.MediaType;
-// import org.springframework.http.ResponseEntity;
-// import org.springframework.web.bind.annotation.*;
+import com.ledgerapi.ledger.LedgerService;
+import com.ledgerapi.web.RequestIdFilter;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
 // import tools.jackson.databind.ObjectMapper;
-//
-// import java.net.URI;
-// import java.util.List;
+
+import java.net.URI;
+import java.util.List;
 
 /**
  * Recording transactions directly through the API, reading them back, and reversing them.
+ * Versioned under {@code /v1}, alongside {@link AccountController}.
  *
- * <p>Disabled for now while we focus on Accounts only (open / read with balance). The full
- * implementation is kept below in a block comment, to be built back in as its own step.
+ * <p>Idempotency-Key handling is temporarily disabled (see the commented block below each
+ * endpoint) while this is built and verified first; it is being wired back in as its own step.
  */
+@RestController
+@RequestMapping("/v1/transactions")
 public class TransactionController {
-
-    /*
-    @RestController
-    @RequestMapping("/v1/transactions")
-    public static class Impl {
 
     private final LedgerService ledgerService;
     // private final IdempotencyService idempotencyService;
@@ -58,43 +56,45 @@ public class TransactionController {
                 .body(TransactionResponse.from(reversal));
     }
 
+    /*
     // --- Idempotent version (re-enable once the idempotency layer is wired back in) ---
-    // public TransactionController(LedgerService ledgerService, IdempotencyService idempotencyService, ObjectMapper objectMapper) {
-    //     this.ledgerService = ledgerService;
-    //     this.idempotencyService = idempotencyService;
-    //     this.objectMapper = objectMapper;
-    // }
-    //
-    // @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
-    // public ResponseEntity<Object> recordTransaction(@RequestHeader("Idempotency-Key") String idempotencyKey,
-    //                                                   @RequestBody String rawBody) {
-    //     return idempotencyService.execute("record-transaction", idempotencyKey, rawBody, () -> {
-    //         RecordTransactionRequest request = parse(rawBody, RecordTransactionRequest.class);
-    //         List<LedgerService.EntryCommand> commands = toCommands(request);
-    //         Transaction transaction = ledgerService.recordTransaction(
-    //                 request.description(), commands, RequestIdFilter.currentRequestId());
-    //         return ResponseEntity.created(URI.create("/v1/transactions/" + transaction.getId()))
-    //                 .body(TransactionResponse.from(transaction));
-    //     });
-    // }
-    //
-    // @PostMapping("/{id}/reversals")
-    // public ResponseEntity<Object> reverseTransaction(@PathVariable String id,
-    //                                                    @RequestHeader("Idempotency-Key") String idempotencyKey) {
-    //     return idempotencyService.execute("reverse-transaction:" + id, idempotencyKey, id, () -> {
-    //         Transaction reversal = ledgerService.reverseTransaction(id, RequestIdFilter.currentRequestId());
-    //         return ResponseEntity.created(URI.create("/v1/transactions/" + reversal.getId()))
-    //                 .body(TransactionResponse.from(reversal));
-    //     });
-    // }
-    //
-    // private <T> T parse(String rawBody, Class<T> type) {
-    //     try {
-    //         return objectMapper.readValue(rawBody, type);
-    //     } catch (Exception e) {
-    //         throw new ValidationException("MALFORMED_REQUEST_BODY", "The request body could not be parsed: " + e.getMessage());
-    //     }
-    // }
+    public TransactionController(LedgerService ledgerService, IdempotencyService idempotencyService, ObjectMapper objectMapper) {
+        this.ledgerService = ledgerService;
+        this.idempotencyService = idempotencyService;
+        this.objectMapper = objectMapper;
+    }
+
+    @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Object> recordTransaction(@RequestHeader("Idempotency-Key") String idempotencyKey,
+                                                      @RequestBody String rawBody) {
+        return idempotencyService.execute("record-transaction", idempotencyKey, rawBody, () -> {
+            RecordTransactionRequest request = parse(rawBody, RecordTransactionRequest.class);
+            List<LedgerService.EntryCommand> commands = toCommands(request);
+            Transaction transaction = ledgerService.recordTransaction(
+                    request.description(), commands, RequestIdFilter.currentRequestId());
+            return ResponseEntity.created(URI.create("/v1/transactions/" + transaction.getId()))
+                    .body(TransactionResponse.from(transaction));
+        });
+    }
+
+    @PostMapping("/{id}/reversals")
+    public ResponseEntity<Object> reverseTransaction(@PathVariable String id,
+                                                       @RequestHeader("Idempotency-Key") String idempotencyKey) {
+        return idempotencyService.execute("reverse-transaction:" + id, idempotencyKey, id, () -> {
+            Transaction reversal = ledgerService.reverseTransaction(id, RequestIdFilter.currentRequestId());
+            return ResponseEntity.created(URI.create("/v1/transactions/" + reversal.getId()))
+                    .body(TransactionResponse.from(reversal));
+        });
+    }
+
+    private <T> T parse(String rawBody, Class<T> type) {
+        try {
+            return objectMapper.readValue(rawBody, type);
+        } catch (Exception e) {
+            throw new ValidationException("MALFORMED_REQUEST_BODY", "The request body could not be parsed: " + e.getMessage());
+        }
+    }
+    */
 
     private List<LedgerService.EntryCommand> toCommands(RecordTransactionRequest request) {
         if (request.entries() == null) {
@@ -115,7 +115,5 @@ public class TransactionController {
             throw new ValidationException("INVALID_DIRECTION", "'" + raw + "' is not DEBIT or CREDIT");
         }
     }
-    }
-    */
 }
 

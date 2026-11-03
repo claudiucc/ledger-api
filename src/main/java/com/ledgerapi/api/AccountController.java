@@ -1,30 +1,29 @@
 package com.ledgerapi.api;
 
 import com.ledgerapi.api.dto.AccountResponse;
-// import com.ledgerapi.api.dto.EntryPageItem;
+import com.ledgerapi.api.dto.EntryPageItem;
 import com.ledgerapi.api.dto.OpenAccountRequest;
 import com.ledgerapi.domain.Account;
 // import com.ledgerapi.error.ValidationException;
 // import com.ledgerapi.idempotency.IdempotencyService;
 import com.ledgerapi.ledger.LedgerService;
-// import org.springframework.data.domain.Page;
-// import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 // import tools.jackson.databind.ObjectMapper;
 
 import java.net.URI;
-// import java.time.Instant;
+import java.time.Instant;
 
 /**
- * Opening accounts and reading them back with their current balance. Versioned under
+ * Opening accounts, reading their balance, and listing their entries. Versioned under
  * {@code /v1}: a breaking change to the request/response shape would go under {@code /v2},
  * leaving existing clients on {@code /v1} unaffected.
  *
- * <p>Focused on these two endpoints only for now. Idempotency-Key handling and the paged
- * entries endpoint are temporarily disabled (see the commented blocks) while this is built and
- * verified first; they are being wired back in as their own steps.
+ * <p>Idempotency-Key handling is temporarily disabled (see the commented block) while this is
+ * built and verified first; it is being wired back in as its own step.
  */
 @RestController
 @RequestMapping("/v1/accounts")
@@ -48,6 +47,17 @@ public class AccountController {
     @GetMapping("/{id}")
     public AccountResponse getAccount(@PathVariable String id) {
         return AccountResponse.from(ledgerService.getAccount(id));
+    }
+
+    /** Newest first, paged, each entry with the balance it left the account at. */
+    @GetMapping("/{id}/entries")
+    public Page<EntryPageItem> getEntries(@PathVariable String id,
+                                           @RequestParam(required = false) Instant asOf,
+                                           @RequestParam(defaultValue = "0") int page,
+                                           @RequestParam(defaultValue = "20") int size) {
+        int pageSize = Math.min(Math.max(size, 1), 200);
+        return ledgerService.getEntries(id, asOf, PageRequest.of(Math.max(page, 0), pageSize))
+                .map(EntryPageItem::from);
     }
 
     /*
@@ -74,17 +84,6 @@ public class AccountController {
         } catch (Exception e) {
             throw new ValidationException("MALFORMED_REQUEST_BODY", "The request body could not be parsed: " + e.getMessage());
         }
-    }
-
-    // Newest first, paged, each entry with the balance it left the account at.
-    @GetMapping("/{id}/entries")
-    public Page<EntryPageItem> getEntries(@PathVariable String id,
-                                           @RequestParam(required = false) Instant asOf,
-                                           @RequestParam(defaultValue = "0") int page,
-                                           @RequestParam(defaultValue = "20") int size) {
-        int pageSize = Math.min(Math.max(size, 1), 200);
-        return ledgerService.getEntries(id, asOf, PageRequest.of(Math.max(page, 0), pageSize))
-                .map(EntryPageItem::from);
     }
     */
 }
