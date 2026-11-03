@@ -29,7 +29,6 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.kafka:spring-kafka'
     implementation 'io.micrometer:micrometer-tracing-bridge-brave'
-    // Spring Boot 4 moved Liquibase autoconfiguration out of spring-boot-autoconfigure into its own thin module.
     implementation 'org.springframework.boot:spring-boot-liquibase'
     implementation 'org.liquibase:liquibase-core'
     compileOnly 'org.projectlombok:lombok'
@@ -37,8 +36,6 @@ dependencies {
     annotationProcessor 'org.projectlombok:lombok'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
-    // Spring Boot 4 moved MockMvc test-slice autoconfiguration (@AutoConfigureMockMvc) out of
-    // spring-boot-test-autoconfigure into its own thin module.
     testImplementation 'org.springframework.boot:spring-boot-webmvc-test'
     testImplementation 'org.springframework.kafka:spring-kafka-test'
     testImplementation 'org.testcontainers:junit-jupiter'
