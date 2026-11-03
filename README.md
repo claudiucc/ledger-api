@@ -135,11 +135,13 @@ pointing at which one. A breaking change to a request/response shape would go un
 
 ### Idempotency
 
-Every mutating endpoint requires an `Idempotency-Key` header. See the companion question-and-answer
-below for *why* this exists alongside the natural keys the domain already has, but in short: an
-account id or a `reversalOfId` can tell you "this already happened", but can't give a retry back
-the *exact* original response (success **or** error) - and `POST /v1/transactions` has no natural
-key at all, since transaction ids are server-generated.
+Every mutating endpoint requires an `Idempotency-Key` header. Natural keys the domain already has
+(an account id, a transaction's `reversalOfId`) can tell you *"this already happened"*, but can't
+give a retry back the *exact* original response - success **or** business error, verbatim - and
+can't detect "the same key was just reused for a genuinely different request"; `POST
+/v1/transactions` has no natural key at all, since transaction ids are server-generated. So instead
+of special-casing each endpoint's natural key and still needing a response cache bolted onto it,
+there is one mechanism, used uniformly by all three mutating endpoints.
 
 Mechanism: the key, scoped to the endpoint (and to the transaction id, for reversals), is claimed
 by inserting a row into `idempotency_record` in its own (`REQUIRES_NEW`) transaction, hashing the
@@ -201,6 +203,12 @@ account balances is exactly zero throughout. `OVERDRAFT_LIMIT_EXCEEDED` and
 
 ## Assumptions and reasonable calls made along the way
 
+- **Java/Spring Boot version**: the brief asks for Java 17; this project targets Java 25 (Gradle
+  toolchain) and Spring Boot 4.1.2, which itself requires a baseline newer than Java 17. This was
+  an early, deliberate choice to build against the current Spring Boot major version rather than
+  an older LTS combination - everything still runs from nothing but Docker, Git and a JDK, exactly
+  as required, since the Docker build stage pulls its own JDK and the host JDK is only needed by
+  the Gradle wrapper.
 - **Settlement accounts** `settlement-eur`, `settlement-usd`, `settlement-jpy` are seeded by the
   Liquibase changelog with no overdraft limit, at zero balance, as the spec requires.
 - **Idempotency-Key is required**, not optional, on every mutating endpoint - a client that wants
