@@ -1,0 +1,19 @@
+## VCS / IDE
+.git
+.gitignore
+.idea
+.gradle
+*.iml
+
+## Build output
+build
+out
+
+## Docs & misc not needed inside the image
+*.md
+*.pdf
+AI_USAGE.md
+
+## OS
+.DS_Store
+
