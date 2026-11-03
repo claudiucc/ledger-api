@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.springframework.data.domain.Persistable;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -12,12 +13,16 @@ import java.util.UUID;
  * Transactional outbox: written in the very same database transaction as the ledger
  * transaction it describes, so "recorded" and "will be announced" can never disagree.
  * A separate poller publishes these to the broker and marks them published.
+ *
+ * <p>Implements {@link Persistable} - same reason as the other application-assigned-id entities
+ * in this codebase: without it, the initial save would go through {@code merge()} (an extra,
+ * needless {@code SELECT} before every insert) instead of {@code persist()}.
  */
 @Entity
 @Table(name = "outbox_event")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class OutboxEvent {
+public class OutboxEvent implements Persistable<String> {
 
     @Id
     @Column(name = "id", length = 36)
@@ -44,6 +49,9 @@ public class OutboxEvent {
     @Column(name = "published_at")
     private Instant publishedAt;
 
+    @Transient
+    private boolean isNew = true;
+
     public OutboxEvent(String aggregateType, String aggregateId, String eventType, String payload, String requestId) {
         this.id = UUID.randomUUID().toString();
         this.aggregateType = aggregateType;
@@ -56,6 +64,17 @@ public class OutboxEvent {
 
     public void markPublished() {
         this.publishedAt = Instant.now();
+    }
+
+    @Override
+    public boolean isNew() {
+        return isNew;
+    }
+
+    @PrePersist
+    @PostLoad
+    void markNotNew() {
+        this.isNew = false;
     }
 }
 

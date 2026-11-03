@@ -43,6 +43,7 @@ class AccountControllerIntegrationTest extends AbstractIntegrationTest {
 
         mockMvc.perform(post("/v1/accounts")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", uniqueId("key"))
                         .content("{\"id\":\"" + id + "\",\"currency\":\"EUR\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(header().string("Location", "/v1/accounts/" + id))
@@ -63,6 +64,7 @@ class AccountControllerIntegrationTest extends AbstractIntegrationTest {
 
         mockMvc.perform(post("/v1/accounts")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", uniqueId("key"))
                         .content("{\"id\":\"" + id + "\",\"currency\":\"USD\",\"overdraftLimit\":50.00}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.overdraftLimit").value(50.00));
@@ -74,6 +76,7 @@ class AccountControllerIntegrationTest extends AbstractIntegrationTest {
 
         mockMvc.perform(post("/v1/accounts")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", uniqueId("key"))
                         .content("{\"id\":\"" + id + "\",\"currency\":\"JPY\"}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.currency").value("JPY"));
@@ -91,18 +94,55 @@ class AccountControllerIntegrationTest extends AbstractIntegrationTest {
         String id = uniqueId("merchant");
         String body = "{\"id\":\"" + id + "\",\"currency\":\"EUR\"}";
 
-        mockMvc.perform(post("/v1/accounts").contentType(MediaType.APPLICATION_JSON).content(body))
+        mockMvc.perform(post("/v1/accounts").contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", uniqueId("key")).content(body))
                 .andExpect(status().isCreated());
 
-        mockMvc.perform(post("/v1/accounts").contentType(MediaType.APPLICATION_JSON).content(body))
+        mockMvc.perform(post("/v1/accounts").contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", uniqueId("key")).content(body))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.errorCode").value("ACCOUNT_ALREADY_EXISTS"));
+    }
+
+    @Test
+    void retryingTheSameRequestWithTheSameIdempotencyKeyReturnsTheSameAnswer() throws Exception {
+        String id = uniqueId("merchant");
+        String body = "{\"id\":\"" + id + "\",\"currency\":\"EUR\"}";
+        String idempotencyKey = uniqueId("key");
+
+        mockMvc.perform(post("/v1/accounts").contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", idempotencyKey).content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(id));
+
+        // Same key, same body: replayed, not a conflict, even though the account now exists.
+        mockMvc.perform(post("/v1/accounts").contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", idempotencyKey).content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(id));
+    }
+
+    @Test
+    void reusingAnIdempotencyKeyForADifferentRequestIsRejected() throws Exception {
+        String idempotencyKey = uniqueId("key");
+
+        mockMvc.perform(post("/v1/accounts").contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", idempotencyKey)
+                        .content("{\"id\":\"" + uniqueId("merchant") + "\",\"currency\":\"EUR\"}"))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/v1/accounts").contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", idempotencyKey)
+                        .content("{\"id\":\"" + uniqueId("merchant") + "\",\"currency\":\"USD\"}"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.errorCode").value("IDEMPOTENCY_KEY_REUSED"));
     }
 
     @Test
     void rejectsAValidIso4217CodeTheLedgerDoesNotSupport() throws Exception {
         mockMvc.perform(post("/v1/accounts")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", uniqueId("key"))
                         .content("{\"id\":\"" + uniqueId("acct") + "\",\"currency\":\"GBP\"}"))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.errorCode").value("UNSUPPORTED_CURRENCY"));
@@ -112,6 +152,7 @@ class AccountControllerIntegrationTest extends AbstractIntegrationTest {
     void rejectsACodeThatIsNotIso4217AtAll() throws Exception {
         mockMvc.perform(post("/v1/accounts")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", uniqueId("key"))
                         .content("{\"id\":\"" + uniqueId("acct") + "\",\"currency\":\"ABC\"}"))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.errorCode").value("NOT_ISO_4217_CURRENCY"));
@@ -121,9 +162,19 @@ class AccountControllerIntegrationTest extends AbstractIntegrationTest {
     void rejectsANegativeOverdraftLimit() throws Exception {
         mockMvc.perform(post("/v1/accounts")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("Idempotency-Key", uniqueId("key"))
                         .content("{\"id\":\"" + uniqueId("acct") + "\",\"currency\":\"EUR\",\"overdraftLimit\":-1.00}"))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.errorCode").value("INVALID_OVERDRAFT_LIMIT"));
+    }
+
+    @Test
+    void openingAnAccountWithoutAnIdempotencyKeyIsRejected() throws Exception {
+        mockMvc.perform(post("/v1/accounts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"id\":\"" + uniqueId("acct") + "\",\"currency\":\"EUR\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("MISSING_HEADER"));
     }
 
     @Test

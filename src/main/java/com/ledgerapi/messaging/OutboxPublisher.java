@@ -1,14 +1,14 @@
 package com.ledgerapi.messaging;
 
-// import com.ledgerapi.config.LedgerProperties;
-// import lombok.extern.slf4j.Slf4j;
-// import org.springframework.kafka.core.KafkaTemplate;
-// import org.springframework.scheduling.annotation.Scheduled;
-// import org.springframework.stereotype.Component;
-// import org.springframework.transaction.annotation.Transactional;
-//
-// import java.util.List;
-// import java.util.concurrent.TimeUnit;
+import com.ledgerapi.config.LedgerProperties;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Publishes recorded transactions to Kafka from the transactional outbox.
@@ -26,14 +26,11 @@ package com.ledgerapi.messaging;
  * silently, and it is never published before the transaction that produced it has committed.
  * Consumers should treat delivery as at-least-once and dedupe by the transaction id in the
  * payload if seeing it twice would matter to them.
- *
- * <p>Disabled for now while the plain API layer is built and verified first; being wired back in
- * as its own step. The implementation below is left in a block comment so it can be restored
- * as-is.
  */
+@Slf4j
+@Component
 public class OutboxPublisher {
 
-    /*
     private final OutboxEventRepository outboxEventRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final LedgerProperties properties;
@@ -72,7 +69,6 @@ public class OutboxPublisher {
         // Only one event type is produced today; this is the seam for adding more.
         return properties.topics().transactionRecorded();
     }
-    */
 }
 
 

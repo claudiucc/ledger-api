@@ -5,6 +5,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.springframework.data.domain.Persistable;
 
 import java.time.Instant;
 
@@ -12,12 +13,19 @@ import java.time.Instant;
  * Tracks one client-supplied Idempotency-Key for one endpoint, so a retried request
  * gets back exactly the response the first attempt produced (or a clear conflict if the
  * same key is reused for a genuinely different request).
+ *
+ * <p>Implements {@link Persistable} because the id is assigned by the application, not the
+ * database: without it, Spring Data JPA treats every instance with a non-null id as "already
+ * existing" and calls {@code EntityManager.merge()} on save, which silently
+ * <em>updates</em> a row that already has that id instead of inserting and throwing a
+ * unique-constraint violation - which is exactly the signal two racing requests claiming the
+ * same key need in order to tell who won.
  */
 @Entity
 @Table(name = "idempotency_record")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class IdempotencyRecord {
+public class IdempotencyRecord implements Persistable<String> {
 
     public enum Status { IN_PROGRESS, COMPLETED }
 
@@ -48,6 +56,9 @@ public class IdempotencyRecord {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Transient
+    private boolean isNew = true;
+
     public IdempotencyRecord(String id, String requestHash) {
         this.id = id;
         this.requestHash = requestHash;
@@ -61,6 +72,17 @@ public class IdempotencyRecord {
         this.responseStatus = responseStatus;
         this.responseBody = responseBody;
         this.updatedAt = Instant.now();
+    }
+
+    @Override
+    public boolean isNew() {
+        return isNew;
+    }
+
+    @PrePersist
+    @PostLoad
+    void markNotNew() {
+        this.isNew = false;
     }
 }
 

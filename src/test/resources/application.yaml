@@ -12,4 +12,25 @@ spring:
     open-in-view: false
   liquibase:
     enabled: false
+  kafka:
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      group-id: ledger-api-test
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    listener:
+      ack-mode: record
+
+ledger:
+  topics:
+    payment-settled: payment.settled
+    payment-settled-dlq: payment.settled.dlq
+    transaction-recorded: ledger.transaction.recorded
+  outbox:
+    poll-delay-ms: 200
+    batch-size: 100
 

@@ -5,10 +5,12 @@ import com.ledgerapi.error.ConflictException;
 import com.ledgerapi.error.NotFoundException;
 import com.ledgerapi.error.ValidationException;
 import com.ledgerapi.error.LedgerApiException.FieldError;
-// import com.ledgerapi.messaging.OutboxEvent;
-// import com.ledgerapi.messaging.OutboxEventRepository;
-// import com.ledgerapi.messaging.TransactionRecordedPayload;
-// import tools.jackson.databind.ObjectMapper;
+import com.ledgerapi.messaging.OutboxEvent;
+import com.ledgerapi.messaging.OutboxEventRepository;
+import com.ledgerapi.messaging.TransactionRecordedPayload;
+import com.ledgerapi.payments.ProcessedPayment;
+import com.ledgerapi.payments.ProcessedPaymentRepository;
+import tools.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.hibernate.Hibernate;
 import org.springframework.data.domain.Page;
@@ -22,8 +24,8 @@ import java.util.*;
 
 /**
  * Validates and records transactions, and reverses them, on top of opening/reading accounts.
- * This is the single place money moves: every entry point in the application (REST, and later
- * the payment-settled consumer) goes through here.
+ * This is the single place money moves: every entry point in the application (REST, and the
+ * payment-settled consumer) goes through here.
  *
  * <p>Accounts touched by a transaction are locked in a single global order (sorted by id) before
  * any balance is read or changed, so two transactions that touch the same accounts in opposite
@@ -31,9 +33,9 @@ import java.util.*;
  * Every check in {@link #record} runs before anything is persisted, so a refused transaction
  * leaves nothing behind - either every entry is written, or none of them are.
  *
- * <p>Outbox publishing (announcing a recorded transaction to other services) and idempotency-key
- * wrapping are temporarily disabled (see the commented-out field, constructor params and method
- * at the bottom) while those are built back in as their own steps.
+ * <p>Every recorded transaction is written to the transactional outbox in the very same database
+ * transaction that records it, so "recorded" and "will be announced" can never disagree; see
+ * {@link com.ledgerapi.messaging.OutboxPublisher} for how it is actually sent to Kafka.
  */
 @Slf4j
 @Service
@@ -42,19 +44,22 @@ public class LedgerService {
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
     private final EntryRepository entryRepository;
-    // private final OutboxEventRepository outboxEventRepository;
-    // private final ObjectMapper objectMapper;
+    private final ProcessedPaymentRepository processedPaymentRepository;
+    private final OutboxEventRepository outboxEventRepository;
+    private final ObjectMapper objectMapper;
 
     public LedgerService(AccountRepository accountRepository,
                           TransactionRepository transactionRepository,
-                          EntryRepository entryRepository /*,
+                          EntryRepository entryRepository,
+                          ProcessedPaymentRepository processedPaymentRepository,
                           OutboxEventRepository outboxEventRepository,
-                          ObjectMapper objectMapper */) {
+                          ObjectMapper objectMapper) {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
         this.entryRepository = entryRepository;
-        // this.outboxEventRepository = outboxEventRepository;
-        // this.objectMapper = objectMapper;
+        this.processedPaymentRepository = processedPaymentRepository;
+        this.outboxEventRepository = outboxEventRepository;
+        this.objectMapper = objectMapper;
     }
 
     public record EntryCommand(String accountId, Direction direction, BigDecimal amount) {
@@ -247,24 +252,72 @@ public class LedgerService {
         netDelta.forEach((id, delta) -> accounts.get(id).applyDelta(delta));
 
         transactionRepository.save(transaction);
-
-        // --- Outbox publishing: disabled for now, being built back in as its own step. ---
-        // publishOutbox(transaction, requestId);
+        publishOutbox(transaction, requestId);
 
         log.info("Recorded transaction {} ({}), {} entries, requestId={}", transaction.getId(), description,
                 entryCommands.size(), requestId);
         return transaction;
     }
 
-    // private void publishOutbox(Transaction transaction, String requestId) {
-    //     TransactionRecordedPayload payload = TransactionRecordedPayload.from(transaction);
-    //     String json;
-    //     try {
-    //         json = objectMapper.writeValueAsString(payload);
-    //     } catch (Exception e) {
-    //         throw new IllegalStateException("Could not serialize transaction-recorded event", e);
-    //     }
-    //     outboxEventRepository.save(new OutboxEvent("Transaction", transaction.getId(), "TransactionRecorded", json, requestId));
-    // }
+    private void publishOutbox(Transaction transaction, String requestId) {
+        TransactionRecordedPayload payload = TransactionRecordedPayload.from(transaction);
+        String json;
+        try {
+            json = objectMapper.writeValueAsString(payload);
+        } catch (Exception e) {
+            throw new IllegalStateException("Could not serialize transaction-recorded event", e);
+        }
+        outboxEventRepository.save(new OutboxEvent("Transaction", transaction.getId(), "TransactionRecorded", json, requestId));
+    }
+
+    // --- Payment-settled messages (consumed from Kafka; see PaymentSettledConsumer) ---
+
+    private static final Map<CurrencyCode, String> SETTLEMENT_ACCOUNT_IDS = Map.of(
+            CurrencyCode.EUR, "settlement-eur",
+            CurrencyCode.USD, "settlement-usd",
+            CurrencyCode.JPY, "settlement-jpy");
+
+    /**
+     * Records the transaction for one settled payment: debit the settlement account for the
+     * given currency, credit the merchant's account. Idempotent on {@code paymentId} - the same
+     * payment, however many times it is redelivered (even under a brand-new event id), is
+     * recorded at most once. Returns {@code true} if a new transaction was recorded, {@code false}
+     * if this payment had already been processed.
+     *
+     * <p>The row that claims {@code paymentId} in {@code processed_payment} is inserted in the
+     * very same transaction as the ledger entries, and that table has {@code payment_id} as its
+     * primary key - so if two deliveries of the same payment race each other, only one commits;
+     * the loser's unique-constraint violation is caught here and treated as "already processed".
+     */
+    @Transactional
+    public boolean recordPaymentSettled(String eventId, String paymentId, String merchantAccountId,
+                                         BigDecimal amount, String currencyCode) {
+        if (processedPaymentRepository.existsById(paymentId)) {
+            log.info("Payment {} (event {}) already processed; skipping redelivery", paymentId, eventId);
+            return false;
+        }
+        CurrencyCode currency;
+        try {
+            currency = CurrencyCode.fromIsoCode(currencyCode);
+        } catch (CurrencyCode.NotIso4217CurrencyException e) {
+            throw new ValidationException("NOT_ISO_4217_CURRENCY", e.getMessage());
+        } catch (CurrencyCode.UnsupportedCurrencyException e) {
+            throw new ValidationException("UNSUPPORTED_CURRENCY", e.getMessage());
+        }
+        String settlementAccountId = SETTLEMENT_ACCOUNT_IDS.get(currency);
+
+        List<EntryCommand> entries = List.of(
+                new EntryCommand(settlementAccountId, Direction.DEBIT, amount),
+                new EntryCommand(merchantAccountId, Direction.CREDIT, amount));
+        Transaction transaction = record("Payment " + paymentId + " settled", entries, null, eventId);
+        try {
+            processedPaymentRepository.saveAndFlush(new ProcessedPayment(paymentId, eventId, transaction.getId()));
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            // A concurrent delivery of the same payment won the race; our transaction rolls back
+            // (the ledger entries above are undone with it) and the caller treats this as "already processed".
+            throw e;
+        }
+        return true;
+    }
 }
 

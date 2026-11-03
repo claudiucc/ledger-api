@@ -28,6 +28,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.kafka:spring-kafka'
+    implementation 'org.springframework.boot:spring-boot-kafka'
     implementation 'io.micrometer:micrometer-tracing-bridge-brave'
     implementation 'org.springframework.boot:spring-boot-liquibase'
     implementation 'org.liquibase:liquibase-core'

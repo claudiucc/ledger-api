@@ -39,6 +39,16 @@ public class Entry {
     @Column(name = "balance_after", nullable = false, precision = 19, scale = 4)
     private BigDecimal balanceAfter;
 
+    /**
+     * Position within the transaction's entry list, assigned explicitly by
+     * {@link Transaction#addEntry} rather than left to JPA's {@code @OrderColumn} to manage:
+     * that annotation needs the owning side's collection to be a Hibernate-tracked
+     * {@code PersistentList} to populate this column on cascade-persist, which a plain
+     * {@code mappedBy} collection on a brand-new parent is not.
+     */
+    @Column(name = "entry_order", nullable = false)
+    private int entryOrder;
+
     public Entry(String accountId, Direction direction, BigDecimal amount, BigDecimal balanceAfter) {
         this.id = UUID.randomUUID().toString();
         this.accountId = accountId;
@@ -47,8 +57,9 @@ public class Entry {
         this.balanceAfter = balanceAfter;
     }
 
-    void assignTo(Transaction transaction) {
+    void assignTo(Transaction transaction, int entryOrder) {
         this.transaction = transaction;
+        this.entryOrder = entryOrder;
     }
 
     /** The signed effect of this entry on the account's balance: +amount for credit, -amount for debit. */

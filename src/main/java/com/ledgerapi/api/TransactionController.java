@@ -5,13 +5,13 @@ import com.ledgerapi.api.dto.TransactionResponse;
 import com.ledgerapi.domain.Direction;
 import com.ledgerapi.domain.Transaction;
 import com.ledgerapi.error.ValidationException;
-// import com.ledgerapi.idempotency.IdempotencyService;
+import com.ledgerapi.idempotency.IdempotencyService;
 import com.ledgerapi.ledger.LedgerService;
 import com.ledgerapi.web.RequestIdFilter;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-// import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 
 import java.net.URI;
 import java.util.List;
@@ -20,44 +20,19 @@ import java.util.List;
  * Recording transactions directly through the API, reading them back, and reversing them.
  * Versioned under {@code /v1}, alongside {@link AccountController}.
  *
- * <p>Idempotency-Key handling is temporarily disabled (see the commented block below each
- * endpoint) while this is built and verified first; it is being wired back in as its own step.
+ * <p>Recording and reversing both require an {@code Idempotency-Key} header, scoped to the
+ * endpoint (and, for reversals, to the transaction id too): a retried request is never recorded
+ * twice, and gets back exactly the response the first attempt produced (see
+ * {@link IdempotencyService}).
  */
 @RestController
 @RequestMapping("/v1/transactions")
 public class TransactionController {
 
     private final LedgerService ledgerService;
-    // private final IdempotencyService idempotencyService;
-    // private final ObjectMapper objectMapper;
+    private final IdempotencyService idempotencyService;
+    private final ObjectMapper objectMapper;
 
-    public TransactionController(LedgerService ledgerService) {
-        this.ledgerService = ledgerService;
-    }
-
-    @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<TransactionResponse> recordTransaction(@RequestBody RecordTransactionRequest request) {
-        List<LedgerService.EntryCommand> commands = toCommands(request);
-        Transaction transaction = ledgerService.recordTransaction(
-                request.description(), commands, RequestIdFilter.currentRequestId());
-        return ResponseEntity.created(URI.create("/v1/transactions/" + transaction.getId()))
-                .body(TransactionResponse.from(transaction));
-    }
-
-    @GetMapping("/{id}")
-    public TransactionResponse getTransaction(@PathVariable String id) {
-        return TransactionResponse.from(ledgerService.getTransaction(id));
-    }
-
-    @PostMapping("/{id}/reversals")
-    public ResponseEntity<TransactionResponse> reverseTransaction(@PathVariable String id) {
-        Transaction reversal = ledgerService.reverseTransaction(id, RequestIdFilter.currentRequestId());
-        return ResponseEntity.created(URI.create("/v1/transactions/" + reversal.getId()))
-                .body(TransactionResponse.from(reversal));
-    }
-
-    /*
-    // --- Idempotent version (re-enable once the idempotency layer is wired back in) ---
     public TransactionController(LedgerService ledgerService, IdempotencyService idempotencyService, ObjectMapper objectMapper) {
         this.ledgerService = ledgerService;
         this.idempotencyService = idempotencyService;
@@ -77,6 +52,11 @@ public class TransactionController {
         });
     }
 
+    @GetMapping("/{id}")
+    public TransactionResponse getTransaction(@PathVariable String id) {
+        return TransactionResponse.from(ledgerService.getTransaction(id));
+    }
+
     @PostMapping("/{id}/reversals")
     public ResponseEntity<Object> reverseTransaction(@PathVariable String id,
                                                        @RequestHeader("Idempotency-Key") String idempotencyKey) {
@@ -94,7 +74,6 @@ public class TransactionController {
             throw new ValidationException("MALFORMED_REQUEST_BODY", "The request body could not be parsed: " + e.getMessage());
         }
     }
-    */
 
     private List<LedgerService.EntryCommand> toCommands(RecordTransactionRequest request) {
         if (request.entries() == null) {
