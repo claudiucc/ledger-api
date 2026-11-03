@@ -16,7 +16,7 @@ import java.time.Instant;
  * assigned by the application, so without it {@code save()} would {@code merge()} (silently
  * updating an existing row) instead of {@code persist()} (inserting, and throwing a
  * unique-constraint violation when two concurrent deliveries of the same payment race each
- * other) - which is exactly the signal {@link com.ledgerapi.ledger.LedgerService#recordPaymentSettled}
+ * other) - which is exactly the signal {@link com.ledgerapi.ledger.PaymentSettlementService#recordPaymentSettled}
  * relies on to detect the race.
  */
 @Entity

@@ -2,7 +2,7 @@ package com.ledgerapi.messaging;
 
 import com.ledgerapi.config.LedgerProperties;
 import com.ledgerapi.error.LedgerApiException;
-import com.ledgerapi.ledger.LedgerService;
+import com.ledgerapi.ledger.PaymentSettlementService;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -13,7 +13,7 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * Consumes payment-settled messages and turns each one into a ledger transaction (see
- * {@link LedgerService#recordPaymentSettled}).
+ * {@link PaymentSettlementService#recordPaymentSettled}).
  *
  * <p>Redelivery: idempotent on {@code paymentId}, not on {@code eventId} - the same payment,
  * resent under a brand-new event id, is still recorded at most once (see
@@ -29,14 +29,14 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 public class PaymentSettledConsumer {
 
-    private final LedgerService ledgerService;
+    private final PaymentSettlementService paymentSettlementService;
     private final ObjectMapper objectMapper;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final LedgerProperties properties;
 
-    public PaymentSettledConsumer(LedgerService ledgerService, ObjectMapper objectMapper,
+    public PaymentSettledConsumer(PaymentSettlementService paymentSettlementService, ObjectMapper objectMapper,
                                    KafkaTemplate<String, String> kafkaTemplate, LedgerProperties properties) {
-        this.ledgerService = ledgerService;
+        this.paymentSettlementService = paymentSettlementService;
         this.objectMapper = objectMapper;
         this.kafkaTemplate = kafkaTemplate;
         this.properties = properties;
@@ -59,7 +59,7 @@ public class PaymentSettledConsumer {
                 deadLetter(rawPayload, "MALFORMED_MESSAGE", "paymentId, accountId, amount and currency are all required");
                 return;
             }
-            boolean recorded = ledgerService.recordPaymentSettled(
+            boolean recorded = paymentSettlementService.recordPaymentSettled(
                     payload.eventId(), payload.paymentId(), payload.accountId(), payload.amount(), payload.currency());
             log.info("Payment {} (event {}): {}", payload.paymentId(), payload.eventId(),
                     recorded ? "recorded" : "already processed, skipped");

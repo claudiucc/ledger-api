@@ -20,16 +20,20 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Proves the guarantees in spec section 6 directly against {@link LedgerService}, backed by a
- * real MySQL database: two accounts transferring money back and forth at the same time, in both
- * directions, never breaks an overdraft limit, never loses an update, and never deadlocks; and at
- * any moment the balances of every account in one currency add up to zero.
+ * Proves the guarantees in spec section 6 directly against {@link AccountService} and
+ * {@link TransactionService}, backed by a real MySQL database: two accounts transferring money
+ * back and forth at the same time, in both directions, never breaks an overdraft limit, never
+ * loses an update, and never deadlocks; and at any moment the balances of every account in one
+ * currency add up to zero.
  */
 @SpringBootTest
 class ConcurrencyIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
-    private LedgerService ledgerService;
+    private AccountService accountService;
+
+    @Autowired
+    private TransactionService transactionService;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -44,12 +48,12 @@ class ConcurrencyIntegrationTest extends AbstractIntegrationTest {
         String b = uniqueId("acct-b");
         // Overdraft limit of 1000 each; start both at 500 via a seeding transaction so transfers
         // in either direction have room to move without ever going negative past the limit.
-        ledgerService.openAccount(a, "EUR", new BigDecimal("1000.00"));
-        ledgerService.openAccount(b, "EUR", new BigDecimal("1000.00"));
-        ledgerService.recordTransaction("seed", List.of(
-                new LedgerService.EntryCommand("settlement-eur", Direction.DEBIT, new BigDecimal("1000.00")),
-                new LedgerService.EntryCommand(a, Direction.CREDIT, new BigDecimal("500.00")),
-                new LedgerService.EntryCommand(b, Direction.CREDIT, new BigDecimal("500.00"))), "seed");
+        accountService.openAccount(a, "EUR", new BigDecimal("1000.00"));
+        accountService.openAccount(b, "EUR", new BigDecimal("1000.00"));
+        transactionService.recordTransaction("seed", List.of(
+                new TransactionService.EntryCommand("settlement-eur", Direction.DEBIT, new BigDecimal("1000.00")),
+                new TransactionService.EntryCommand(a, Direction.CREDIT, new BigDecimal("500.00")),
+                new TransactionService.EntryCommand(b, Direction.CREDIT, new BigDecimal("500.00"))), "seed");
 
         int threadsPerDirection = 8;
         int transfersPerThread = 25;
@@ -75,8 +79,8 @@ class ConcurrencyIntegrationTest extends AbstractIntegrationTest {
         assertThat(failures.get()).as("no transfer failed for a reason other than its own business rules").isZero();
 
         // Equal numbers of transfers each way, for the same amount: balances end up unchanged.
-        Account accountA = ledgerService.getAccount(a);
-        Account accountB = ledgerService.getAccount(b);
+        Account accountA = accountService.getAccount(a);
+        Account accountB = accountService.getAccount(b);
         assertThat(accountA.getBalance()).isEqualByComparingTo("500.00");
         assertThat(accountB.getBalance()).isEqualByComparingTo("500.00");
 
@@ -94,9 +98,9 @@ class ConcurrencyIntegrationTest extends AbstractIntegrationTest {
         }
         for (int i = 0; i < count; i++) {
             try {
-                ledgerService.recordTransaction("transfer", List.of(
-                        new LedgerService.EntryCommand(from, Direction.DEBIT, amount),
-                        new LedgerService.EntryCommand(to, Direction.CREDIT, amount)), uniqueId("req"));
+                transactionService.recordTransaction("transfer", List.of(
+                        new TransactionService.EntryCommand(from, Direction.DEBIT, amount),
+                        new TransactionService.EntryCommand(to, Direction.CREDIT, amount)), uniqueId("req"));
             } catch (Exception e) {
                 failures.incrementAndGet();
             }

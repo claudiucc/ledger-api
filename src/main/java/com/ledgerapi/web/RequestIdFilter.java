@@ -18,7 +18,7 @@ import java.util.UUID;
  * otherwise a freshly generated one - and puts it in the logging MDC (see the "requestId" token
  * in the log pattern) and echoes it back as a response header. This is what lets one request be
  * followed through the logs, and on into the transaction it recorded and the event it announced:
- * the id flows from here into {@code LedgerService}, onto the {@code ledger_transaction.request_id}
+ * the id flows from here into {@code TransactionService}, onto the {@code ledger_transaction.request_id}
  * column and into the outbox payload published to Kafka.
  */
 @Component

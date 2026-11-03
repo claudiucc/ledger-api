@@ -84,15 +84,31 @@ container. Check the result with `curl http://localhost:8080/v1/accounts/merchan
 
 ## Design decisions
 
-### Domain model
+### Domain model and service layout
 
 `Account` (id, currency, overdraft limit, balance), `Transaction` (id, description, recorded-at,
 optional `reversalOfId`) and `Entry` (account, direction, amount, balance-after) map directly onto
-the spec, as plain JPA entities with a thin service on top - no repository/use-case/port
-abstraction layers, since the whole domain fits comfortably in one service
-(`LedgerService`) that is the single place money moves, whether the trigger is a REST call or a
-Kafka message. Money is `BigDecimal`, column type `DECIMAL(19,4)` - never a float, so
-`0.10 + 0.20` is always exactly `0.30`, and MySQL does the same exact decimal arithmetic Java does.
+the spec, as plain JPA entities with a thin service layer on top - no
+repository/use-case/port abstraction layers, since the whole domain fits comfortably in a handful
+of focused services rather than one giant one or a deep hierarchy:
+
+- **`AccountService`** - opens and reads accounts, and lists an account's entries. Doesn't move
+  money itself.
+- **`TransactionService`** - the single place money moves. Validates and records transactions,
+  reverses them, and writes the outbox event that announces each one. Every entry point that
+  records money movement (the REST API directly, or a payment settling) ultimately calls into
+  this one service, so the locking/validation/outbox-writing logic is never duplicated.
+- **`PaymentSettlementService`** - turns one payment-settled message into the right pair of
+  entries (debit the settlement account for that currency, credit the merchant) and the
+  idempotency-by-`paymentId` bookkeeping around it, built *on top of* `TransactionService` rather
+  than re-implementing recording.
+
+Each is a plain `@Service`, injected where it's needed (`AccountController` only needs
+`AccountService`; `TransactionController` only needs `TransactionService`;
+`PaymentSettledConsumer` only needs `PaymentSettlementService`) - no controller depends on more
+than the one service whose job matches the endpoint. Money is `BigDecimal`, column type
+`DECIMAL(19,4)` - never a float, so `0.10 + 0.20` is always exactly `0.30`, and MySQL does the same
+exact decimal arithmetic Java does.
 
 Currencies are a fixed enum (`EUR`, `USD`, `JPY`) carrying their ISO 4217 decimal places.
 `CurrencyCode.fromIsoCode` first checks the code against `java.util.Currency` (every real ISO 4217
@@ -101,7 +117,8 @@ different, specific error codes, as the spec's refusal table asks for.
 
 ### Recording a transaction: one method, one lock order, checks before writes
 
-`LedgerService.record(...)` is the only place a transaction is created. It:
+`TransactionService.record(...)` (private; reached through `recordTransaction` and
+`reverseTransaction`) is the only place a transaction is created. It:
 
 1. Validates shape (≥2 entries, positive amounts) with no database access at all.
 2. Locks every **distinct** account touched, in ascending id order
@@ -113,6 +130,7 @@ different, specific error codes, as the spec's refusal table asks for.
    in memory, against the now-locked, now-current balances.
 4. Only if every check passes: builds the `Transaction` and its `Entry` rows (each carrying the
    balance immediately after it) and persists them, applying every delta to the already-locked
+
    `Account` rows in the same transaction.
 
 Every check runs before any write, so a refused request leaves nothing behind - verified directly
@@ -155,12 +173,13 @@ once the winner finishes. A key reused with a different body is rejected
 ### Redelivery and the payment-settled consumer
 
 `PaymentSettledConsumer` consumes `payment.settled` and calls
-`LedgerService.recordPaymentSettled`, which is idempotent on **`paymentId`**, deliberately not
-`eventId` - "redelivered under a brand-new event id" is explicitly a redelivery, not a new
-payment. `processed_payment` has `payment_id` as its primary key; the row is inserted in the very
-same transaction as the ledger entries, so if two deliveries of the same payment race each other
-(e.g. two consumer instances, or a crash-and-redeliver), only one commits and the other's
-unique-constraint violation is treated as "already processed" - not an error.
+`PaymentSettlementService.recordPaymentSettled`, which is idempotent on **`paymentId`**,
+deliberately not `eventId` - "redelivered under a brand-new event id" is explicitly a redelivery,
+not a new payment. `processed_payment` has `payment_id` as its primary key; the row is inserted in
+the very same transaction as the ledger entries (the call into `TransactionService` joins the
+calling transaction rather than starting its own), so if two deliveries of the same payment race
+each other (e.g. two consumer instances, or a crash-and-redeliver), only one commits and the
+other's unique-constraint violation is treated as "already processed" - not an error.
 
 A message that can't be recorded for a business reason (malformed JSON, missing fields, an unknown
 account, the wrong currency) is published to `payment.settled.dlq` together with why, logged, and

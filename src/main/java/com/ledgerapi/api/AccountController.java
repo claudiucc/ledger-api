@@ -6,7 +6,7 @@ import com.ledgerapi.api.dto.OpenAccountRequest;
 import com.ledgerapi.domain.Account;
 import com.ledgerapi.error.ValidationException;
 import com.ledgerapi.idempotency.IdempotencyService;
-import com.ledgerapi.ledger.LedgerService;
+import com.ledgerapi.ledger.AccountService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.MediaType;
@@ -30,12 +30,12 @@ import java.time.Instant;
 @RequestMapping("/v1/accounts")
 public class AccountController {
 
-    private final LedgerService ledgerService;
+    private final AccountService accountService;
     private final IdempotencyService idempotencyService;
     private final ObjectMapper objectMapper;
 
-    public AccountController(LedgerService ledgerService, IdempotencyService idempotencyService, ObjectMapper objectMapper) {
-        this.ledgerService = ledgerService;
+    public AccountController(AccountService accountService, IdempotencyService idempotencyService, ObjectMapper objectMapper) {
+        this.accountService = accountService;
         this.idempotencyService = idempotencyService;
         this.objectMapper = objectMapper;
     }
@@ -45,7 +45,7 @@ public class AccountController {
                                                @RequestBody String rawBody) {
         return idempotencyService.execute("open-account", idempotencyKey, rawBody, () -> {
             OpenAccountRequest request = parse(rawBody, OpenAccountRequest.class);
-            Account account = ledgerService.openAccount(request.id(), request.currency(), request.overdraftLimit());
+            Account account = accountService.openAccount(request.id(), request.currency(), request.overdraftLimit());
             return ResponseEntity.created(URI.create("/v1/accounts/" + account.getId()))
                     .body(AccountResponse.from(account));
         });
@@ -53,7 +53,7 @@ public class AccountController {
 
     @GetMapping("/{id}")
     public AccountResponse getAccount(@PathVariable String id) {
-        return AccountResponse.from(ledgerService.getAccount(id));
+        return AccountResponse.from(accountService.getAccount(id));
     }
 
     /** Newest first, paged, each entry with the balance it left the account at. */
@@ -63,7 +63,7 @@ public class AccountController {
                                            @RequestParam(defaultValue = "0") int page,
                                            @RequestParam(defaultValue = "20") int size) {
         int pageSize = Math.min(Math.max(size, 1), 200);
-        return ledgerService.getEntries(id, asOf, PageRequest.of(Math.max(page, 0), pageSize))
+        return accountService.getEntries(id, asOf, PageRequest.of(Math.max(page, 0), pageSize))
                 .map(EntryPageItem::from);
     }
 

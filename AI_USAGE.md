@@ -2,7 +2,8 @@
 
 I used an AI coding assistant (GitHub Copilot, agent mode) throughout this exercise, for:
 
-- **Scaffolding and iterating on the implementation**: the domain model, `LedgerService`,
+- **Scaffolding and iterating on the implementation**: the domain model, the ledger service layer
+  (`AccountService`, `TransactionService`, `PaymentSettlementService`),
   controllers, exception handling, the Kafka outbox/consumer, idempotency layer, and the
   Testcontainers-based test suite were built and refined with the assistant, in an iterative
   back-and-forth rather than one big generation.
@@ -35,6 +36,13 @@ I used an AI coding assistant (GitHub Copilot, agent mode) throughout this exerc
      `KafkaTemplate`/`@KafkaListener` support silently wasn't autoconfigured and the context failed
      to start. Found by actually running `./gradlew test` and reading the `NoSuchBeanDefinitionException`.
 - **Writing this README and this file.**
+- **Splitting the service layer**: the original single `LedgerService` (accounts, transaction
+  recording/reversal, outbox publishing, and payment-settlement, all in one class) was split, on
+  request, into `AccountService`, `TransactionService` and `PaymentSettlementService`, each with
+  one responsibility and only the dependencies it needs - re-verified by recompiling and rerunning
+  the full test suite (including the cross-service transaction-propagation path in
+  `PaymentSettlementService`, which must join `TransactionService`'s transaction rather than start
+  its own) afterwards, not assumed correct from the diff alone.
 
 How it was checked: every change was validated by actually compiling (`./gradlew compileJava`/
 `compileTestJava`) and running the real test suite (`./gradlew test`, backed by Testcontainers

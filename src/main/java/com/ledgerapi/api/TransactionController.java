@@ -6,7 +6,7 @@ import com.ledgerapi.domain.Direction;
 import com.ledgerapi.domain.Transaction;
 import com.ledgerapi.error.ValidationException;
 import com.ledgerapi.idempotency.IdempotencyService;
-import com.ledgerapi.ledger.LedgerService;
+import com.ledgerapi.ledger.TransactionService;
 import com.ledgerapi.web.RequestIdFilter;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -29,12 +29,12 @@ import java.util.List;
 @RequestMapping("/v1/transactions")
 public class TransactionController {
 
-    private final LedgerService ledgerService;
+    private final TransactionService transactionService;
     private final IdempotencyService idempotencyService;
     private final ObjectMapper objectMapper;
 
-    public TransactionController(LedgerService ledgerService, IdempotencyService idempotencyService, ObjectMapper objectMapper) {
-        this.ledgerService = ledgerService;
+    public TransactionController(TransactionService transactionService, IdempotencyService idempotencyService, ObjectMapper objectMapper) {
+        this.transactionService = transactionService;
         this.idempotencyService = idempotencyService;
         this.objectMapper = objectMapper;
     }
@@ -44,8 +44,8 @@ public class TransactionController {
                                                       @RequestBody String rawBody) {
         return idempotencyService.execute("record-transaction", idempotencyKey, rawBody, () -> {
             RecordTransactionRequest request = parse(rawBody, RecordTransactionRequest.class);
-            List<LedgerService.EntryCommand> commands = toCommands(request);
-            Transaction transaction = ledgerService.recordTransaction(
+            List<TransactionService.EntryCommand> commands = toCommands(request);
+            Transaction transaction = transactionService.recordTransaction(
                     request.description(), commands, RequestIdFilter.currentRequestId());
             return ResponseEntity.created(URI.create("/v1/transactions/" + transaction.getId()))
                     .body(TransactionResponse.from(transaction));
@@ -54,14 +54,14 @@ public class TransactionController {
 
     @GetMapping("/{id}")
     public TransactionResponse getTransaction(@PathVariable String id) {
-        return TransactionResponse.from(ledgerService.getTransaction(id));
+        return TransactionResponse.from(transactionService.getTransaction(id));
     }
 
     @PostMapping("/{id}/reversals")
     public ResponseEntity<Object> reverseTransaction(@PathVariable String id,
                                                        @RequestHeader("Idempotency-Key") String idempotencyKey) {
         return idempotencyService.execute("reverse-transaction:" + id, idempotencyKey, id, () -> {
-            Transaction reversal = ledgerService.reverseTransaction(id, RequestIdFilter.currentRequestId());
+            Transaction reversal = transactionService.reverseTransaction(id, RequestIdFilter.currentRequestId());
             return ResponseEntity.created(URI.create("/v1/transactions/" + reversal.getId()))
                     .body(TransactionResponse.from(reversal));
         });
@@ -75,12 +75,12 @@ public class TransactionController {
         }
     }
 
-    private List<LedgerService.EntryCommand> toCommands(RecordTransactionRequest request) {
+    private List<TransactionService.EntryCommand> toCommands(RecordTransactionRequest request) {
         if (request.entries() == null) {
             throw new ValidationException("MIN_TWO_ENTRIES", "A transaction needs at least two entries");
         }
         return request.entries().stream()
-                .map(e -> new LedgerService.EntryCommand(e.accountId(), parseDirection(e.direction()), e.amount()))
+                .map(e -> new TransactionService.EntryCommand(e.accountId(), parseDirection(e.direction()), e.amount()))
                 .toList();
     }
 
