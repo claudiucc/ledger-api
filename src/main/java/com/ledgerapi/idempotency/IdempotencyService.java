@@ -6,8 +6,7 @@ import com.ledgerapi.error.ApiExceptionMapper;
 import com.ledgerapi.error.IdempotencyKeyReusedException;
 import com.ledgerapi.error.LedgerApiException;
 import com.ledgerapi.error.RequestInProgressException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -34,10 +33,10 @@ import java.util.function.Supplier;
  * body. A key reused with a different body is rejected outright: the ledger never mistakes a
  * different request for a retry.
  */
+@Slf4j
 @Service
 public class IdempotencyService {
 
-    private static final Logger log = LoggerFactory.getLogger(IdempotencyService.class);
 
     private final IdempotencyRecordRepository repository;
     private final ObjectMapper objectMapper;

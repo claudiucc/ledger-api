@@ -1,54 +1,127 @@
 package com.ledgerapi.ledger;
 
 import com.ledgerapi.domain.*;
-import com.ledgerapi.error.LedgerApiException.FieldError;
 import com.ledgerapi.error.ConflictException;
 import com.ledgerapi.error.NotFoundException;
 import com.ledgerapi.error.ValidationException;
-import com.ledgerapi.messaging.OutboxEvent;
-import com.ledgerapi.messaging.OutboxEventRepository;
-import com.ledgerapi.messaging.TransactionRecordedPayload;
-import tools.jackson.databind.ObjectMapper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+// import com.ledgerapi.error.LedgerApiException.FieldError;
+// import com.ledgerapi.messaging.OutboxEvent;
+// import com.ledgerapi.messaging.OutboxEventRepository;
+// import com.ledgerapi.messaging.TransactionRecordedPayload;
+// import tools.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
+// import org.hibernate.Hibernate;
+// import org.springframework.data.domain.Page;
+// import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+// import java.time.Instant;
 import java.util.*;
 
 /**
- * Validates and records transactions, and reverses them. This is the single place money moves:
- * every entry point in the application (REST, the payment-settled consumer) goes through here.
+ * Opens accounts and reads them back with their current balance.
+ *
+ * <p>Focused on Accounts only for now (open / read with balance). Recording and reversing
+ * transactions, and listing an account's entries, are commented out below (full implementation
+ * kept intact) while that is built back in as its own step.
  *
  * <p>Accounts touched by a transaction are locked in a single global order (sorted by id) before
  * any balance is read or changed, so two transactions that touch the same accounts in opposite
- * order (A->B and B->A) always acquire their locks in the same sequence and can never deadlock.
- * Everything - the transaction row, its entries, the account balance updates and the outbox event
- * announcing it - is written in one database transaction: either all of it is visible, or none of
- * it is.
+ * order (A->B and B->A) always acquire their locks in the same sequence and can never deadlock -
+ * see the commented-out {@code record}/{@code reverseTransaction} methods.
  */
+@Slf4j
 @Service
 public class LedgerService {
 
-    private static final Logger log = LoggerFactory.getLogger(LedgerService.class);
-
     private final AccountRepository accountRepository;
-    private final TransactionRepository transactionRepository;
-    private final OutboxEventRepository outboxEventRepository;
-    private final ObjectMapper objectMapper;
+    // private final TransactionRepository transactionRepository;
+    // private final EntryRepository entryRepository;
+    // private final OutboxEventRepository outboxEventRepository;
+    // private final ObjectMapper objectMapper;
 
-    public LedgerService(AccountRepository accountRepository,
+    public LedgerService(AccountRepository accountRepository /*,
                           TransactionRepository transactionRepository,
+                          EntryRepository entryRepository,
                           OutboxEventRepository outboxEventRepository,
-                          ObjectMapper objectMapper) {
+                          ObjectMapper objectMapper */) {
         this.accountRepository = accountRepository;
-        this.transactionRepository = transactionRepository;
-        this.outboxEventRepository = outboxEventRepository;
-        this.objectMapper = objectMapper;
+        // this.transactionRepository = transactionRepository;
+        // this.entryRepository = entryRepository;
+        // this.outboxEventRepository = outboxEventRepository;
+        // this.objectMapper = objectMapper;
     }
 
     public record EntryCommand(String accountId, Direction direction, BigDecimal amount) {
+    }
+
+    /**
+     * Opens a new account. The id is caller-supplied (e.g. "merchant-42") so it can be used as a
+     * stable external reference from day one. An absent overdraft limit defaults to zero, meaning
+     * the balance can never go negative.
+     */
+    @Transactional
+    public Account openAccount(String id, String currencyCode, BigDecimal overdraftLimit) {
+        if (id == null || id.isBlank()) {
+            throw new ValidationException("MISSING_ACCOUNT_ID", "Account id is required");
+        }
+        CurrencyCode currency;
+        try {
+            currency = CurrencyCode.fromIsoCode(currencyCode);
+        } catch (CurrencyCode.NotIso4217CurrencyException e) {
+            throw new ValidationException("NOT_ISO_4217_CURRENCY", e.getMessage());
+        } catch (CurrencyCode.UnsupportedCurrencyException e) {
+            throw new ValidationException("UNSUPPORTED_CURRENCY", e.getMessage());
+        }
+
+        BigDecimal limit = overdraftLimit == null ? BigDecimal.ZERO.setScale(currency.decimalPlaces()) : overdraftLimit;
+        if (limit.signum() < 0) {
+            throw new ValidationException("INVALID_OVERDRAFT_LIMIT", "Overdraft limit cannot be negative");
+        }
+        int effectiveScale = Math.max(0, limit.stripTrailingZeros().scale());
+        if (effectiveScale > currency.decimalPlaces()) {
+            throw new ValidationException("AMOUNT_EXCEEDS_CURRENCY_DECIMALS",
+                    currency + " has no more than " + currency.decimalPlaces() + " decimal place(s)");
+        }
+
+        if (accountRepository.existsById(id)) {
+            throw new ConflictException("ACCOUNT_ALREADY_EXISTS", "Account " + id + " already exists");
+        }
+
+        Account account = new Account(id, currency, limit);
+        accountRepository.save(account);
+        log.info("Opened account {} ({}, overdraft limit {})", id, currency, limit);
+        return account;
+    }
+
+    @Transactional(readOnly = true)
+    public Account getAccount(String id) {
+        return accountRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("ACCOUNT_NOT_FOUND", "No account with id " + id));
+    }
+
+    // --- Transactions, reversals and entries: disabled for now while we focus on Accounts only.
+    // Full implementation kept below, commented out, to be built back in as its own step. ---
+    /*
+    @Transactional(readOnly = true)
+    public Transaction getTransaction(String id) {
+        Transaction transaction = transactionRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("TRANSACTION_NOT_FOUND", "No transaction with id " + id));
+        Hibernate.initialize(transaction.getEntries());
+        return transaction;
+    }
+
+    // An account's entries, newest first, paged, each with the balance after it.
+    @Transactional(readOnly = true)
+    public Page<Entry> getEntries(String accountId, Instant asOf, Pageable pageable) {
+        if (!accountRepository.existsById(accountId)) {
+            throw new NotFoundException("ACCOUNT_NOT_FOUND", "No account with id " + accountId);
+        }
+        return asOf == null
+                ? entryRepository.findByAccountIdOrderByNewestFirst(accountId, pageable)
+                : entryRepository.findAsOf(accountId, asOf, pageable);
     }
 
     @Transactional
@@ -173,22 +246,24 @@ public class LedgerService {
 
         transactionRepository.save(transaction);
 
-        publishOutbox(transaction, requestId);
+        // --- Outbox publishing: disabled for now, being built back in as its own step. ---
+        // publishOutbox(transaction, requestId);
 
         log.info("Recorded transaction {} ({}), {} entries, requestId={}", transaction.getId(), description,
                 entryCommands.size(), requestId);
         return transaction;
     }
 
-    private void publishOutbox(Transaction transaction, String requestId) {
-        TransactionRecordedPayload payload = TransactionRecordedPayload.from(transaction);
-        String json;
-        try {
-            json = objectMapper.writeValueAsString(payload);
-        } catch (Exception e) {
-            throw new IllegalStateException("Could not serialize transaction-recorded event", e);
-        }
-        outboxEventRepository.save(new OutboxEvent("Transaction", transaction.getId(), "TransactionRecorded", json, requestId));
-    }
+    // private void publishOutbox(Transaction transaction, String requestId) {
+    //     TransactionRecordedPayload payload = TransactionRecordedPayload.from(transaction);
+    //     String json;
+    //     try {
+    //         json = objectMapper.writeValueAsString(payload);
+    //     } catch (Exception e) {
+    //         throw new IllegalStateException("Could not serialize transaction-recorded event", e);
+    //     }
+    //     outboxEventRepository.save(new OutboxEvent("Transaction", transaction.getId(), "TransactionRecorded", json, requestId));
+    // }
+    */
 }
 
