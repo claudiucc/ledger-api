@@ -8,7 +8,7 @@ import com.ledgerapi.error.ValidationException;
 import com.ledgerapi.messaging.OutboxEvent;
 import com.ledgerapi.messaging.OutboxEventRepository;
 import com.ledgerapi.messaging.TransactionRecordedPayload;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
